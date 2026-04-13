@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AR Anatomy</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <style>
+    *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --glass:rgba(6,6,16,.60);--border:rgba(255,255,255,.09);
+      --pill:999px;--gold:#D4AF37;--red:#FF3B5C;--cyan:#00C8F8;
+    }
+    html,body{width:100%;height:100%;background:#000;overflow:hidden;
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      -webkit-font-smoothing:antialiased;user-select:none;}
+    #camera{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;
+      transform:scaleX(-1);z-index:1;filter:brightness(.65) contrast(1.1) saturate(.8);}
+    #canvas{position:fixed;inset:0;width:100%;height:100%;z-index:2;pointer-events:none;}
+    .glass{background:var(--glass);backdrop-filter:blur(20px) saturate(1.3);
+      -webkit-backdrop-filter:blur(20px) saturate(1.3);border:1px solid var(--border);}
+
+    /* top-right */
+    #topBar{position:fixed;top:18px;right:20px;z-index:10;display:flex;align-items:center;
+      gap:14px;padding:9px 20px;border-radius:var(--pill);font-size:12px;font-weight:600;
+      color:rgba(255,255,255,.85);letter-spacing:.12em;}
+    #topBar .brand{letter-spacing:.22em;color:#fff}
+    #topBar .sep{opacity:.22}
+    #fps{color:var(--gold);min-width:4ch;font-weight:700}
+
+    /* top-left body toggle */
+    #bodyToggle{position:fixed;top:18px;left:20px;z-index:10;display:flex;gap:6px;
+      padding:6px;border-radius:var(--pill);}
+    .body-btn{padding:8px 18px;border-radius:var(--pill);border:1px solid transparent;
+      background:transparent;color:rgba(255,255,255,.40);font-size:11px;font-weight:700;
+      letter-spacing:.18em;cursor:pointer;pointer-events:all;transition:all .25s ease;
+      text-transform:uppercase;}
+    .body-btn:hover{color:rgba(255,255,255,.70)}
+    .body-btn.active{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff}
+
+    /* top-center status */
+    #statusPill{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10;
+      padding:9px 22px;border-radius:var(--pill);font-size:12px;font-weight:600;
+      letter-spacing:.09em;color:rgba(255,255,255,.75);transition:opacity .3s;white-space:nowrap;}
+
+    /* pose view indicator — bottom left */
+    #poseTag{position:fixed;bottom:80px;left:20px;z-index:10;padding:8px 16px;
+      border-radius:var(--pill);font-size:10px;font-weight:700;letter-spacing:.18em;
+      text-transform:uppercase;color:rgba(255,255,255,.55);transition:all .3s;
+      display:none;}
+    #poseTag.visible{display:block}
+
+    /* bottom mode bar */
+    #modeBar{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:10;
+      display:flex;gap:6px;padding:6px;border-radius:var(--pill);}
+    .mode-btn{padding:9px 22px;border-radius:var(--pill);border:1px solid transparent;
+      background:transparent;color:rgba(255,255,255,.40);font-size:11px;font-weight:700;
+      letter-spacing:.14em;cursor:pointer;pointer-events:all;transition:all .25s ease;
+      text-transform:uppercase;}
+    .mode-btn:hover{color:rgba(255,255,255,.75)}
+    .mode-btn.active{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.22);color:#fff}
+    #btn-skeletal.active{color:var(--gold);border-color:rgba(212,175,55,.5);background:rgba(212,175,55,.10)}
+    #btn-vascular.active{color:var(--red);border-color:rgba(255,59,92,.5);background:rgba(255,59,92,.10)}
+    #btn-neural.active{color:var(--cyan);border-color:rgba(0,200,248,.5);background:rgba(0,200,248,.10)}
+
+    /* fact card */
+    #factCard{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10;
+      padding:12px 22px;border-radius:16px;font-size:12.5px;line-height:1.65;
+      color:rgba(255,255,255,.58);text-align:center;max-width:500px;transition:opacity .4s;}
+    #factCard strong{color:rgba(255,255,255,.90);font-weight:600}
+
+    /* start overlay */
+    #startOverlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.92);
+      backdrop-filter:blur(16px);display:flex;flex-direction:column;
+      align-items:center;justify-content:center;transition:opacity .5s ease;}
+    .ov-eyebrow{font-size:11px;font-weight:700;letter-spacing:.38em;text-transform:uppercase;
+      color:var(--gold);margin-bottom:18px;}
+    .ov-h1{font-size:clamp(2.8rem,8vw,5.5rem);font-weight:200;letter-spacing:.28em;
+      color:#fff;margin-bottom:8px;line-height:1;}
+    .ov-sub{font-size:14px;color:rgba(255,255,255,.38);letter-spacing:.07em;text-align:center;
+      line-height:1.95;margin-bottom:44px;}
+    .mode-preview{display:flex;gap:16px;margin-bottom:44px;}
+    .mp-item{display:flex;flex-direction:column;align-items:center;gap:10px;
+      padding:18px 20px;border-radius:18px;min-width:110px;}
+    .mp-dot{width:13px;height:13px;border-radius:50%;box-shadow:0 0 14px currentColor;}
+    .mp-label{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;}
+    .mp-desc{font-size:10.5px;color:rgba(255,255,255,.32);}
+    #startBtn{padding:14px 48px;border:1px solid rgba(255,255,255,.20);
+      background:rgba(255,255,255,.06);color:#fff;border-radius:var(--pill);
+      font-size:12px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
+      cursor:pointer;transition:background .25s,transform .2s;}
+    #startBtn:hover{background:rgba(255,255,255,.13);transform:scale(1.04)}
+  </style>
+</head>
+<body>
+
+<div id="startOverlay">
+  <div class="ov-eyebrow">Hand · Head · Face · AR</div>
+  <h1 class="ov-h1">ANATOMY</h1>
+  <p class="ov-sub">Hold your hand up, or look into the camera.<br>Move and rotate your head — watch the anatomy change.</p>
+  <div class="mode-preview">
+    <div class="mp-item glass">
+      <div class="mp-dot" style="color:var(--gold);background:var(--gold)"></div>
+      <div class="mp-label" style="color:var(--gold)">Skeletal</div>
+      <div class="mp-desc">Bones &amp; joints</div>
+    </div>
+    <div class="mp-item glass">
+      <div class="mp-dot" style="color:var(--red);background:var(--red)"></div>
+      <div class="mp-label" style="color:var(--red)">Vascular</div>
+      <div class="mp-desc">Arteries &amp; veins</div>
+    </div>
+    <div class="mp-item glass">
+      <div class="mp-dot" style="color:var(--cyan);background:var(--cyan)"></div>
+      <div class="mp-label" style="color:var(--cyan)">Neural</div>
+      <div class="mp-desc">Nerve pathways</div>
+    </div>
+  </div>
+  <button id="startBtn">Start Scanning</button>
+</div>
+
+<video id="camera" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+
+<div id="bodyToggle" class="glass">
+  <button class="body-btn active" data-body="hand">Hand</button>
+  <button class="body-btn"        data-body="face">Head &amp; Face</button>
+</div>
+
+<div id="topBar" class="glass">
+  <span class="brand">AR ANATOMY</span>
+  <span class="sep">|</span>
+  <span id="fps">- fps</span>
+</div>
+
+<div id="statusPill" class="glass">Show your hand</div>
+<div id="poseTag"    class="glass"></div>
+<div id="modeBar"    class="glass">
+  <button class="mode-btn active" id="btn-skeletal" data-mode="skeletal">Skeletal</button>
+  <button class="mode-btn"        id="btn-vascular" data-mode="vascular">Vascular</button>
+  <button class="mode-btn"        id="btn-neural"   data-mode="neural">Neural</button>
+</div>
+<div id="factCard" class="glass"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   HAND DATA
+═══════════════════════════════════════════════════════════ */
+const HAND_MODES = {
+  skeletal: {
+    color: '#D4AF37',
+    fact: '<strong>27 bones</strong> in the human hand — nearly 1/4 of all 206 bones in the body. Each fingertip has 3 stacked phalanges.',
+    labels: [
+      { lm:0,  title:'Carpal Bones',     sub:'Wrist complex',      side:'left'  },
+      { lm:5,  title:'Metacarpal II',    sub:'2nd metacarpal',     side:'right' },
+      { lm:6,  title:'Proximal Phalanx', sub:'First finger joint', side:'right' },
+      { lm:7,  title:'Middle Phalanx',   sub:'Second joint',       side:'right' },
+      { lm:8,  title:'Distal Phalanx',   sub:'Fingertip bone',     side:'right' },
+      { lm:17, title:'Metacarpal V',     sub:'5th metacarpal',     side:'left'  },
+      { lm:4,  title:'Thumb Phalanges',  sub:'3 phalangeal bones', side:'left'  },
+    ],
+  },
+  vascular: {
+    color: '#FF3B5C',
+    fact: '<strong>Capillary beds</strong> in fingertips detect temperature changes of 0.001 °C — more sensitive than any clinical thermometer.',
+    labels: [
+      { lm:0,  title:'Radial Artery',    sub:'Lateral pulse point',  side:'left'  },
+      { lm:17, title:'Ulnar Artery',     sub:'Medial blood supply',  side:'right' },
+      { lm:9,  title:'Palmar Arch',      sub:'Superficial arterial', side:'right' },
+      { lm:8,  title:'Digital Arteries', sub:'Index supply',         side:'right' },
+      { lm:20, title:'Digital Arteries', sub:'Ulnar supply',         side:'left'  },
+      { lm:12, title:'Capillary Network',sub:'O2 exchange zone',     side:'right' },
+    ],
+  },
+  neural: {
+    color: '#00C8F8',
+    fact: '<strong>~3,000 touch receptors</strong> per fingertip — the highest nerve density in the body. You can feel a ridge just 13 nm tall.',
+    labels: [
+      { lm:4,  title:'Radial Nerve',       sub:'Lateral sensation',   side:'left'  },
+      { lm:20, title:'Ulnar Nerve',        sub:'Medial sensation',    side:'right' },
+      { lm:9,  title:'Median Nerve',       sub:'Central pathway',     side:'right' },
+      { lm:8,  title:'Digital Nerves',     sub:'Sensory fibers',      side:'right' },
+      { lm:0,  title:'Carpal Tunnel',      sub:'Nerve passage point', side:'left'  },
+      { lm:12, title:'Meissner Corpuscles',sub:'Touch receptors',     side:'right' },
+    ],
+  },
+};
+
+const HAND_SEQS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],[5,17],
+];
+
+/* ═══════════════════════════════════════════════════════════
+   FACE / HEAD DATA — pose-aware
+   Poses: front | profileLeft | profileRight | up | down
+   sub strings drawn on canvas — plain text only
+═══════════════════════════════════════════════════════════ */
+const FACE_MODES = {
+
+  skeletal: {
+    color: '#D4AF37',
+    poses: {
+      front: {
+        tag: 'FRONT VIEW',
+        fact: '<strong>22 bones</strong> form the human skull — 8 cranial bones protect the brain; 14 facial bones shape your unique face.',
+        labels: [
+          { lm:10,  title:'Frontal Bone',    sub:'Forehead & upper orbits',  side:'right' },
+          { lm:33,  title:'Orbital Margin',  sub:'Eye socket bony rim',      side:'left'  },
+          { lm:116, title:'Zygomatic Bone',  sub:'Cheekbone prominence',     side:'left'  },
+          { lm:4,   title:'Nasal Bone',      sub:'Nose bridge structure',    side:'right' },
+          { lm:0,   title:'Maxilla',         sub:'Upper jaw — fused bone',   side:'right' },
+          { lm:152, title:'Mandible',        sub:'Only movable skull bone',  side:'right' },
+          { lm:234, title:'Temporal Bone',   sub:'Houses the inner ear',     side:'left'  },
+        ],
+      },
+      profileRight: { // user turns right → we see LEFT profile
+        tag: 'LEFT PROFILE',
+        fact: '<strong>Temporal bone</strong> is one of the most complex bones — it houses the cochlea, semicircular canals, and middle ear ossicles.',
+        labels: [
+          { lm:234, title:'Temporal Bone',    sub:'Left temporal region',    side:'left'  },
+          { lm:338, title:'Parietal Bone',    sub:'Lateral skull wall',      side:'left'  },
+          { lm:127, title:'Mastoid Process',  sub:'Air cells behind the ear', side:'left' },
+          { lm:116, title:'Zygomatic Arch',   sub:'Cheekbone arch',          side:'left'  },
+          { lm:172, title:'TMJ',              sub:'Temporomandibular joint', side:'left'  },
+          { lm:162, title:'Ext. Auditory',    sub:'Ear canal opening',       side:'left'  },
+        ],
+      },
+      profileLeft: { // user turns left → we see RIGHT profile
+        tag: 'RIGHT PROFILE',
+        fact: '<strong>The TMJ</strong> (temporomandibular joint) is the most-used joint in the body — it moves every time you speak, chew, or swallow.',
+        labels: [
+          { lm:454, title:'Temporal Bone',    sub:'Right temporal region',   side:'right' },
+          { lm:297, title:'Parietal Bone',    sub:'Lateral skull wall',      side:'right' },
+          { lm:356, title:'Mastoid Process',  sub:'Air cells behind the ear',side:'right' },
+          { lm:345, title:'Zygomatic Arch',   sub:'Cheekbone arch',          side:'right' },
+          { lm:397, title:'TMJ',              sub:'Temporomandibular joint', side:'right' },
+          { lm:389, title:'Ext. Auditory',    sub:'Ear canal opening',       side:'right' },
+        ],
+      },
+      up: {
+        tag: 'CHIN VIEW',
+        fact: '<strong>Mental symphysis</strong> — the midline fusion point of the two halves of the mandible, fused by age 2 in humans.',
+        labels: [
+          { lm:152, title:'Mental Symphysis', sub:'Chin midpoint fusion',    side:'right' },
+          { lm:172, title:'Body of Mandible', sub:'Left jaw body underside', side:'left'  },
+          { lm:397, title:'Body of Mandible', sub:'Right jaw body underside',side:'right' },
+          { lm:0,   title:'Intermaxillary',   sub:'Upper jaw from below',    side:'right' },
+          { lm:4,   title:'Nasal Columella',  sub:'Cartilage from below',    side:'right' },
+          { lm:116, title:'Zygomatic Body',   sub:'Left cheekbone from below',side:'left' },
+        ],
+      },
+      down: {
+        tag: 'CROWN VIEW',
+        fact: '<strong>Sagittal suture</strong> runs along the skull midline joining the two parietal bones — visible from above as a fused ridge in adults.',
+        labels: [
+          { lm:10,  title:'Frontal Bone',     sub:'Anterior skull cap',      side:'right' },
+          { lm:338, title:'Parietal Bone',    sub:'Left skull roof',         side:'left'  },
+          { lm:297, title:'Parietal Bone',    sub:'Right skull roof',        side:'right' },
+          { lm:234, title:'Coronal Suture',   sub:'Frontal-parietal joint',  side:'left'  },
+          { lm:454, title:'Coronal Suture',   sub:'Frontal-parietal joint',  side:'right' },
+          { lm:251, title:'Squamous Suture',  sub:'Temporal-parietal joint', side:'left'  },
+        ],
+      },
+    },
+  },
+
+  vascular: {
+    color: '#FF3B5C',
+    poses: {
+      front: {
+        tag: 'FRONT VIEW',
+        fact: '<strong>Facial artery</strong> curves over the jaw and zigzags up the face, pulsing visibly at the jaw angle — the key pulse point in CPR assessment.',
+        labels: [
+          { lm:234, title:'Superficial Temporal',sub:'Temple pulse point',     side:'left'  },
+          { lm:172, title:'Facial Artery',       sub:'Jaw angle — key pulse',  side:'left'  },
+          { lm:116, title:'Angular Artery',      sub:'Near inner eye corner',  side:'left'  },
+          { lm:4,   title:'Dorsal Nasal Art.',   sub:'Nose bridge supply',     side:'right' },
+          { lm:0,   title:'Labial Arteries',     sub:'Lip blood supply',       side:'right' },
+          { lm:10,  title:'Supratrochlear A.',   sub:'Forehead artery',        side:'right' },
+          { lm:33,  title:'Supraorbital A.',     sub:'Brow artery branch',     side:'left'  },
+        ],
+      },
+      profileRight: {
+        tag: 'LEFT PROFILE',
+        fact: '<strong>Superficial temporal artery</strong> is palpable at the temple — used historically to measure fever and still used in arteritis diagnosis.',
+        labels: [
+          { lm:234, title:'Superficial Temporal',sub:'Main temporal pulse',    side:'left'  },
+          { lm:127, title:'Posterior Auricular', sub:'Behind-ear artery',      side:'left'  },
+          { lm:338, title:'Parietal Branch',     sub:'Temporal artery branch', side:'left'  },
+          { lm:172, title:'Facial Artery',       sub:'At jaw angle',           side:'left'  },
+          { lm:162, title:'Occipital Branch',    sub:'Posterior supply',       side:'left'  },
+        ],
+      },
+      profileLeft: {
+        tag: 'RIGHT PROFILE',
+        fact: '<strong>Occipital artery</strong> branches off the external carotid and supplies the scalp from behind — visible in the posterior triangle of the neck.',
+        labels: [
+          { lm:454, title:'Superficial Temporal',sub:'Main temporal pulse',    side:'right' },
+          { lm:356, title:'Posterior Auricular', sub:'Behind-ear artery',      side:'right' },
+          { lm:297, title:'Parietal Branch',     sub:'Temporal artery branch', side:'right' },
+          { lm:397, title:'Facial Artery',       sub:'At jaw angle',           side:'right' },
+          { lm:389, title:'Occipital Branch',    sub:'Posterior supply',       side:'right' },
+        ],
+      },
+      up: {
+        tag: 'CHIN VIEW',
+        fact: '<strong>Submental artery</strong> — branch of the facial artery running along the underside of the chin, supplying the submandibular region.',
+        labels: [
+          { lm:152, title:'Submental Artery',    sub:'Below chin midline',     side:'right' },
+          { lm:172, title:'Facial A. Branch',    sub:'Jaw underside left',     side:'left'  },
+          { lm:397, title:'Facial A. Branch',    sub:'Jaw underside right',    side:'right' },
+          { lm:0,   title:'Inferior Labial A.',  sub:'Lower lip supply',       side:'right' },
+          { lm:4,   title:'Columellar Artery',   sub:'Nose base supply',       side:'right' },
+        ],
+      },
+      down: {
+        tag: 'CROWN VIEW',
+        fact: '<strong>Diploic veins</strong> — a network of large veins running inside the skull diploe (spongy layer), draining the cranial bones from above.',
+        labels: [
+          { lm:10,  title:'Supratrochlear A.',   sub:'Forehead midline',       side:'right' },
+          { lm:338, title:'Diploic Vein',        sub:'Left parietal drainage', side:'left'  },
+          { lm:297, title:'Diploic Vein',        sub:'Right parietal drainage',side:'right' },
+          { lm:234, title:'Frontal Branch',      sub:'Temporal art. branch',   side:'left'  },
+          { lm:454, title:'Frontal Branch',      sub:'Temporal art. branch',   side:'right' },
+        ],
+      },
+    },
+  },
+
+  neural: {
+    color: '#00C8F8',
+    poses: {
+      front: {
+        tag: 'FRONT VIEW',
+        fact: '<strong>Trigeminal nerve (CN V)</strong> is the largest cranial nerve, dividing into 3 branches that provide sensation to the entire face.',
+        labels: [
+          { lm:33,  title:'CN V1 · Ophthalmic', sub:'Forehead & eye sensation',side:'left'  },
+          { lm:116, title:'CN V2 · Maxillary',  sub:'Cheek & nose sensation',  side:'left'  },
+          { lm:152, title:'CN V3 · Mandibular', sub:'Jaw & chin sensation',    side:'right' },
+          { lm:234, title:'Auriculotemporal N.',sub:'Temple & ear sensation',  side:'left'  },
+          { lm:0,   title:'Mental Nerve',        sub:'Lower lip sensation',     side:'right' },
+          { lm:10,  title:'Supraorbital N.',     sub:'Scalp sensation CN V1',   side:'right' },
+          { lm:4,   title:'Infratrochlear N.',   sub:'Nose bridge sensation',   side:'right' },
+        ],
+      },
+      profileRight: {
+        tag: 'LEFT PROFILE',
+        fact: '<strong>Facial nerve (CN VII)</strong> exits the skull at the stylomastoid foramen behind the ear, then fans out across the face to control all 43 expression muscles.',
+        labels: [
+          { lm:127, title:'CN VII Exit Point',   sub:'Stylomastoid foramen',   side:'left'  },
+          { lm:234, title:'Temporal Branch',     sub:'CN VII — brow & forehead',side:'left' },
+          { lm:116, title:'Zygomatic Branch',    sub:'CN VII — lower eye',     side:'left'  },
+          { lm:172, title:'Marginal Mandibular', sub:'CN VII — lower lip',     side:'left'  },
+          { lm:338, title:'Greater Auricular',   sub:'C2-C3 — ear sensation',  side:'left'  },
+          { lm:162, title:'Lesser Occipital N.', sub:'C2 — scalp behind ear',  side:'left'  },
+        ],
+      },
+      profileLeft: {
+        tag: 'RIGHT PROFILE',
+        fact: '<strong>Greater auricular nerve</strong> (C2-C3) is the most commonly injured nerve during parotid surgery — it supplies the ear, earlobe, and parotid region.',
+        labels: [
+          { lm:356, title:'CN VII Exit Point',   sub:'Stylomastoid foramen',   side:'right' },
+          { lm:454, title:'Temporal Branch',     sub:'CN VII — brow & forehead',side:'right'},
+          { lm:345, title:'Zygomatic Branch',    sub:'CN VII — lower eye',     side:'right' },
+          { lm:397, title:'Marginal Mandibular', sub:'CN VII — lower lip',     side:'right' },
+          { lm:297, title:'Greater Auricular',   sub:'C2-C3 — ear sensation',  side:'right' },
+          { lm:389, title:'Lesser Occipital N.', sub:'C2 — scalp behind ear',  side:'right' },
+        ],
+      },
+      up: {
+        tag: 'CHIN VIEW',
+        fact: '<strong>Mental nerve</strong> — branch of CN V3 exiting the mental foramen of the mandible, providing sensation to the chin and lower lip.',
+        labels: [
+          { lm:152, title:'Mental Nerve',        sub:'CN V3 — chin sensation',  side:'right' },
+          { lm:172, title:'Buccal Branch',       sub:'CN VII — mouth corner',   side:'left'  },
+          { lm:397, title:'Buccal Branch',       sub:'CN VII — mouth corner',   side:'right' },
+          { lm:0,   title:'Inferior Labial N.',  sub:'Lower lip sensation',     side:'right' },
+          { lm:4,   title:'Nasal Branches',      sub:'CN V1 — nasal tip',       side:'right' },
+        ],
+      },
+      down: {
+        tag: 'CROWN VIEW',
+        fact: '<strong>Supraorbital nerve</strong> (CN V1) emerges above the eye and spreads across the forehead and scalp — its path is visible from above in thin-skinned individuals.',
+        labels: [
+          { lm:10,  title:'Supraorbital N.',     sub:'V1 — forehead & scalp',  side:'right' },
+          { lm:338, title:'Supratrochlear N.',   sub:'V1 — medial forehead',   side:'left'  },
+          { lm:297, title:'Supratrochlear N.',   sub:'V1 — medial forehead',   side:'right' },
+          { lm:234, title:'Temporal N.',         sub:'V3 — temporal scalp',    side:'left'  },
+          { lm:454, title:'Temporal N.',         sub:'V3 — temporal scalp',    side:'right' },
+          { lm:251, title:'Auricular N.',        sub:'C2-C3 — side scalp',     side:'left'  },
+        ],
+      },
+    },
+  },
+};
+
+// Face mesh contour sequences
+const FACE_OVAL  = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10];
+const LEFT_EYE   = [33,160,158,133,153,144,33];
+const RIGHT_EYE  = [362,385,387,263,373,380,362];
+const LEFT_BROW  = [46,53,52,65,55,70,63,105,66,107];
+const RIGHT_BROW = [276,283,282,295,285,300,293,334,296,336];
+const LIPS       = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146,61];
+const NOSE       = [168,6,197,195,5,4,1,98,2,326,327,2,94];
+const FACE_SEQS  = [FACE_OVAL,LEFT_EYE,RIGHT_EYE,LEFT_BROW,RIGHT_BROW,LIPS,NOSE];
+
+/* ═══════════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════════ */
+let mode       = 'skeletal';
+let bodyPart   = 'hand';
+let subjectVis = false;
+let scanStart  = null;
+let animTime   = 0;
+let fpsFrames  = 0;
+let fpsLastT   = performance.now();
+let latestLM   = null;
+let headPose   = 'front';       // current detected pose key
+let poseFade   = 1;             // opacity for label transition
+let lastPose   = 'front';
+
+const $cam    = document.getElementById('camera');
+const $canvas = document.getElementById('canvas');
+const ctx     = $canvas.getContext('2d');
+const $fps    = document.getElementById('fps');
+const $status = document.getElementById('statusPill');
+const $fact   = document.getElementById('factCard');
+const $pose   = document.getElementById('poseTag');
+
+function resize() { $canvas.width = window.innerWidth; $canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize);
+resize();
+
+/* ═══════════════════════════════════════════════════════════
+   HEAD POSE DETECTION
+   Uses raw MediaPipe landmark coordinates (NOT screen-converted)
+   lm.x: 0=camera left, 1=camera right
+   When user turns face RIGHT: nose.x → 0 (camera left)
+   When user turns face LEFT:  nose.x → 1 (camera right)
+═══════════════════════════════════════════════════════════ */
+function detectHeadPose(landmarks) {
+  const nose  = landmarks[4];
+  const head  = landmarks[10];
+  const chin  = landmarks[152];
+  if (!nose || !head || !chin) return 'front';
+
+  // YAW (left/right rotation): nose raw x vs center
+  const yawX = nose.x;  // 0.5 = forward
+  let yaw = 'front';
+  if (yawX < 0.34) yaw = 'profileRight';  // user turned right → we see left profile
+  else if (yawX > 0.66) yaw = 'profileLeft'; // user turned left → we see right profile
+
+  // PITCH (up/down tilt): ratio of chin-to-nose vs full face height
+  const faceH = Math.abs(chin.y - head.y);
+  if (faceH < 0.01) return yaw !== 'front' ? yaw : 'front';
+  const lower = (chin.y - nose.y) / faceH;
+  let pitch = 'none';
+  if (lower < 0.42) pitch = 'up';
+  else if (lower > 0.70) pitch = 'down';
+
+  // Pitch overrides yaw for up/down views
+  if (pitch === 'up')   return 'up';
+  if (pitch === 'down') return 'down';
+  return yaw;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════════ */
+function lm2s(lm) {
+  return { x: (1 - lm.x) * $canvas.width, y: lm.y * $canvas.height };
+}
+function getCfg() {
+  return bodyPart === 'hand' ? HAND_MODES[mode] : FACE_MODES[mode];
+}
+function getFacePoseData(poseKey) {
+  const fm = FACE_MODES[mode];
+  return fm.poses[poseKey] || fm.poses.front;
+}
+function hex2(v) {
+  return Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,'0');
+}
+function roundRect(x,y,w,h,r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DRAW CONNECTIONS
+   seqs: array of index sequences. Consecutive pairs connected.
+═══════════════════════════════════════════════════════════ */
+function drawConnections(landmarks, color, seqs, alpha) {
+  const c = color;
+  const a = alpha === undefined ? 1 : alpha;
+  seqs.forEach(seq => {
+    for (let i = 0; i < seq.length - 1; i++) {
+      const ai = seq[i], bi = seq[i+1];
+      if (!landmarks[ai] || !landmarks[bi]) continue;
+      const p1 = lm2s(landmarks[ai]);
+      const p2 = lm2s(landmarks[bi]);
+
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = a;
+
+      if (mode === 'skeletal') {
+        ctx.shadowBlur = 10; ctx.shadowColor = c;
+        ctx.strokeStyle = c + 'bb'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        ctx.shadowBlur = 0; ctx.strokeStyle = c; ctx.lineWidth = 0.9;
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+
+      } else if (mode === 'vascular') {
+        const pulse = 0.55 + 0.45*Math.abs(Math.sin(animTime*2.2));
+        ctx.shadowBlur = 14*pulse; ctx.shadowColor = c;
+        ctx.strokeStyle = c; ctx.lineWidth = 2.4*pulse;
+        ctx.setLineDash([7,13]); ctx.lineDashOffset = -(animTime*55)%20;
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0; ctx.strokeStyle = c+'28'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+
+      } else if (mode === 'neural') {
+        ctx.shadowBlur = 10; ctx.shadowColor = c;
+        ctx.strokeStyle = c+'55'; ctx.lineWidth = 1.7;
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        const t = (animTime*1.3 + i*0.07) % 1;
+        const sx = p1.x+(p2.x-p1.x)*t, sy = p1.y+(p2.y-p1.y)*t;
+        ctx.shadowBlur = 18; ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(sx,sy,2.2,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DRAW DOTS
+═══════════════════════════════════════════════════════════ */
+function drawHandDots(landmarks, cfg) {
+  const c = cfg.color;
+  landmarks.forEach((lm,i) => {
+    const p = lm2s(lm);
+    const tip = [4,8,12,16,20].includes(i);
+    ctx.save();
+    if (mode === 'vascular') {
+      const pulse = 0.6+0.4*Math.abs(Math.sin(animTime*2.2+i*0.4));
+      ctx.shadowBlur=(tip?20:10)*pulse; ctx.shadowColor=c; ctx.fillStyle=c;
+      ctx.beginPath(); ctx.arc(p.x,p.y,(tip?5:3)*pulse,0,Math.PI*2); ctx.fill();
+    } else if (mode === 'neural') {
+      const fl=Math.random()>.04?1:.3;
+      ctx.shadowBlur=tip?18:10; ctx.shadowColor=c;
+      ctx.fillStyle=`rgba(0,200,248,${fl})`;
+      ctx.beginPath(); ctx.arc(p.x,p.y,tip?4.5:2.8,0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.shadowBlur=14; ctx.shadowColor=c; ctx.strokeStyle=c;
+      ctx.lineWidth=tip?2.5:1.8; ctx.fillStyle=tip?c:c+'28';
+      ctx.beginPath(); ctx.arc(p.x,p.y,tip?5:3.5,0,Math.PI*2); ctx.fill();
+      if(!tip) ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
+function drawFaceDots(landmarks, poseData, color) {
+  poseData.labels.forEach(({lm}) => {
+    if (!landmarks[lm]) return;
+    const p = lm2s(landmarks[lm]);
+    ctx.save();
+    ctx.globalAlpha = poseFade;
+    if (mode === 'vascular') {
+      const pulse=0.6+0.4*Math.abs(Math.sin(animTime*2.2+lm*0.1));
+      ctx.shadowBlur=22*pulse; ctx.shadowColor=color; ctx.fillStyle=color;
+      ctx.beginPath(); ctx.arc(p.x,p.y,5*pulse,0,Math.PI*2); ctx.fill();
+    } else if (mode === 'neural') {
+      const fl=Math.random()>.04?1:.4;
+      ctx.shadowBlur=20; ctx.shadowColor=color;
+      ctx.fillStyle=`rgba(0,200,248,${fl})`;
+      ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.shadowBlur=16; ctx.shadowColor=color; ctx.fillStyle=color;
+      ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DRAW LABEL CARD
+═══════════════════════════════════════════════════════════ */
+function drawLabel(ax,ay,title,sub,color,side,alpha) {
+  const PAD=16, GAP=50, H=40, R=10;
+  ctx.save();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+
+  ctx.font = `600 12px 'Inter',system-ui,sans-serif`;
+  const tw = ctx.measureText(title).width;
+  ctx.font = `400 10.5px 'Inter',system-ui,sans-serif`;
+  const sw = ctx.measureText(sub).width;
+  const W  = Math.max(tw,sw)+PAD*2;
+  const bx = side==='right' ? ax+GAP : ax-GAP-W;
+  const by = ay-H/2;
+  const bxC = Math.max(4, Math.min($canvas.width-W-4, bx));
+  const byC = Math.max(4, Math.min($canvas.height-H-4, by));
+  const ex  = side==='right' ? bxC : bxC+W;
+
+  // Dot
+  ctx.shadowBlur=22; ctx.shadowColor=color; ctx.fillStyle=color;
+  ctx.beginPath(); ctx.arc(ax,ay,4.5,0,Math.PI*2); ctx.fill();
+  // Leader line
+  ctx.shadowBlur=6; ctx.shadowColor=color;
+  ctx.strokeStyle=color+'70'; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(ax,ay);
+  ctx.bezierCurveTo((ax+ex)/2,ay,(ax+ex)/2,ay,ex,ay);
+  ctx.stroke();
+  // Box
+  ctx.shadowBlur=0; ctx.fillStyle='rgba(5,5,16,.82)';
+  roundRect(bxC,byC,W,H,R); ctx.fill();
+  ctx.strokeStyle=color+'40'; ctx.lineWidth=1;
+  roundRect(bxC,byC,W,H,R); ctx.stroke();
+  // Accent strip
+  ctx.fillStyle=color;
+  ctx.fillRect(side==='right'?bxC:bxC+W-3, byC+R, 3, H-R*2);
+  // Text
+  ctx.shadowBlur=0; ctx.textBaseline='top'; ctx.textAlign='left';
+  ctx.font=`600 12px 'Inter',system-ui,sans-serif`;
+  ctx.fillStyle=color;
+  ctx.fillText(title, bxC+PAD, byC+10);
+  ctx.font=`400 10.5px 'Inter',system-ui,sans-serif`;
+  ctx.fillStyle='rgba(255,255,255,.42)';
+  ctx.fillText(sub, bxC+PAD, byC+26);
+  ctx.restore();
+}
+
+function drawLabels(landmarks, labels, color, alpha) {
+  labels.forEach(({lm,title,sub,side}) => {
+    if (!landmarks[lm]) return;
+    const p = lm2s(landmarks[lm]);
+    let s = side;
+    if (s==='right' && p.x > $canvas.width*0.74) s='left';
+    if (s==='left'  && p.x < $canvas.width*0.26) s='right';
+    drawLabel(p.x,p.y,title,sub,color,s,alpha);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HEAD POSE ORIENTATION COMPASS (canvas HUD)
+═══════════════════════════════════════════════════════════ */
+function drawPoseCompass(pose, color) {
+  const cx=52, cy=$canvas.height-52, r=26;
+  ctx.save();
+  // Circle bg
+  ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(5,5,16,.75)';
+  ctx.beginPath(); ctx.arc(cx,cy,r+4,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=color+'40'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy,r+4,0,Math.PI*2); ctx.stroke();
+
+  // Cross-hair lines
+  ctx.strokeStyle='rgba(255,255,255,.10)'; ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.moveTo(cx-r,cy); ctx.lineTo(cx+r,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx,cy+r); ctx.stroke();
+
+  // Head dot position based on pose
+  const offsets = {
+    front:        [0, 0],
+    profileRight: [-14, 0],
+    profileLeft:  [14, 0],
+    up:           [0, -14],
+    down:         [0, 14],
+  };
+  const [ox,oy] = offsets[pose] || [0,0];
+
+  // Trail
+  ctx.shadowBlur=8; ctx.shadowColor=color;
+  ctx.fillStyle=color+'50';
+  ctx.beginPath(); ctx.arc(cx,cy,5,0,Math.PI*2); ctx.fill();
+
+  // Moving head indicator
+  ctx.shadowBlur=14; ctx.shadowColor=color;
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.arc(cx+ox,cy+oy,5.5,0,Math.PI*2); ctx.fill();
+
+  // Label
+  ctx.shadowBlur=0; ctx.fillStyle=color;
+  ctx.font=`700 7.5px 'Inter',system-ui,sans-serif`;
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText('HEAD', cx, cy+r+7);
+  ctx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SCANNER SWEEP
+═══════════════════════════════════════════════════════════ */
+function drawScanner(landmarks, idxSubset) {
+  if (!scanStart) return;
+  const elapsed = (Date.now()-scanStart)/1000;
+  if (elapsed>1.4) { scanStart=null; return; }
+  const indices = idxSubset || [...Array(landmarks.length).keys()];
+  const pts = indices.map(i=>landmarks[i]?lm2s(landmarks[i]):null).filter(Boolean);
+  if (!pts.length) return;
+  const minX=Math.min(...pts.map(p=>p.x))-18;
+  const maxX=Math.max(...pts.map(p=>p.x))+18;
+  const minY=Math.min(...pts.map(p=>p.y))-18;
+  const maxY=Math.max(...pts.map(p=>p.y))+18;
+  const scanY=minY+(maxY-minY)*Math.min(elapsed/.75,1);
+  const cfg=getCfg(); const c=cfg.color;
+  const a=Math.max(0,1-elapsed/1.4);
+  ctx.save();
+  const g=ctx.createLinearGradient(minX,0,maxX,0);
+  g.addColorStop(0,c+'00'); g.addColorStop(.5,c+hex2(a*210)); g.addColorStop(1,c+'00');
+  ctx.shadowBlur=18; ctx.shadowColor=c;
+  ctx.strokeStyle=g; ctx.lineWidth=1.8;
+  ctx.beginPath(); ctx.moveTo(minX,scanY); ctx.lineTo(maxX,scanY); ctx.stroke();
+  const bg=ctx.createLinearGradient(0,scanY-32,0,scanY+10);
+  bg.addColorStop(0,c+'00'); bg.addColorStop(1,c+hex2(a*38));
+  ctx.shadowBlur=0; ctx.fillStyle=bg;
+  ctx.fillRect(minX,scanY-32,maxX-minX,42);
+  const bs=18;
+  ctx.strokeStyle=c+hex2(a*200); ctx.lineWidth=2; ctx.shadowBlur=8;
+  [[minX,minY,1,1],[maxX,minY,-1,1],[minX,maxY,1,-1],[maxX,maxY,-1,-1]].forEach(([cx2,cy2,sx,sy])=>{
+    ctx.beginPath();
+    ctx.moveTo(cx2,cy2+sy*bs); ctx.lineTo(cx2,cy2); ctx.lineTo(cx2+sx*bs,cy2);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MAIN RENDER
+═══════════════════════════════════════════════════════════ */
+function render(landmarks) {
+  ctx.clearRect(0,0,$canvas.width,$canvas.height);
+  if (!landmarks||!landmarks.length) return;
+  animTime = performance.now()/1000;
+
+  if (bodyPart === 'hand') {
+    const cfg = HAND_MODES[mode];
+    drawScanner(landmarks);
+    drawConnections(landmarks, cfg.color, HAND_SEQS);
+    drawHandDots(landmarks, cfg);
+    drawLabels(landmarks, cfg.labels, cfg.color, 1);
+
+  } else {
+    // Detect head pose
+    const newPose = detectHeadPose(landmarks);
+    if (newPose !== headPose) {
+      lastPose = headPose;
+      headPose = newPose;
+      poseFade = 0;  // start fade-in
+      // Update fact card and pose tag
+      const pd = getFacePoseData(headPose);
+      $fact.innerHTML = pd.fact;
+      $pose.textContent = pd.tag;
+    }
+    // Animate poseFade 0→1
+    if (poseFade < 1) poseFade = Math.min(1, poseFade + 0.07);
+
+    const fm     = FACE_MODES[mode];
+    const pdata  = getFacePoseData(headPose);
+
+    drawScanner(landmarks, FACE_OVAL);
+    drawConnections(landmarks, fm.color, FACE_SEQS, 1);
+    drawFaceDots(landmarks, pdata, fm.color);
+    drawLabels(landmarks, pdata.labels, fm.color, poseFade);
+    drawPoseCompass(headPose, fm.color);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UI CONTROLS
+═══════════════════════════════════════════════════════════ */
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === m)
+  );
+  if (bodyPart === 'hand') {
+    $fact.innerHTML = HAND_MODES[m].fact;
+  } else {
+    const pd = getFacePoseData(headPose);
+    $fact.innerHTML = pd.fact;
+  }
+}
+
+function setBodyPart(bp) {
+  bodyPart   = bp;
+  latestLM   = null;
+  subjectVis = false;
+  scanStart  = null;
+  headPose   = 'front';
+  poseFade   = 1;
+  ctx.clearRect(0,0,$canvas.width,$canvas.height);
+  document.querySelectorAll('.body-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.body === bp)
+  );
+  if (bp === 'hand') {
+    $status.textContent = 'Show your hand';
+    $pose.classList.remove('visible');
+    $fact.innerHTML = HAND_MODES[mode].fact;
+  } else {
+    $status.textContent = 'Look into the camera';
+    $pose.classList.add('visible');
+    const pd = getFacePoseData('front');
+    $pose.textContent = pd.tag;
+    $fact.innerHTML = pd.fact;
+  }
+  $status.style.opacity = '1';
+}
+
+document.querySelectorAll('.mode-btn').forEach(b =>
+  b.addEventListener('click', () => setMode(b.dataset.mode))
+);
+document.querySelectorAll('.body-btn').forEach(b =>
+  b.addEventListener('click', () => setBodyPart(b.dataset.body))
+);
+
+/* ═══════════════════════════════════════════════════════════
+   MEDIAPIPE CALLBACKS
+═══════════════════════════════════════════════════════════ */
+function tickFps() {
+  fpsFrames++;
+  const now = performance.now();
+  if (now-fpsLastT >= 1000) {
+    const f=fpsFrames; fpsFrames=0; fpsLastT=now;
+    $fps.textContent=`${f} fps`;
+    $fps.style.color = f>=25?'#D4AF37':f>=15?'#FFD166':'#FF3B5C';
+  }
+}
+
+function onHandResults(results) {
+  if (bodyPart !== 'hand') return;
+  tickFps();
+  if (!results.multiHandLandmarks||!results.multiHandLandmarks.length) {
+    if (subjectVis) {
+      subjectVis=false; latestLM=null; scanStart=null;
+      ctx.clearRect(0,0,$canvas.width,$canvas.height);
+      $status.textContent='Show your hand'; $status.style.opacity='1';
+    }
+    return;
+  }
+  if (!subjectVis) { subjectVis=true; scanStart=Date.now(); $status.style.opacity='0'; }
+  latestLM = results.multiHandLandmarks[0];
+}
+
+function onFaceResults(results) {
+  if (bodyPart !== 'face') return;
+  tickFps();
+  if (!results.multiFaceLandmarks||!results.multiFaceLandmarks.length) {
+    if (subjectVis) {
+      subjectVis=false; latestLM=null; scanStart=null;
+      ctx.clearRect(0,0,$canvas.width,$canvas.height);
+      $status.textContent='Look into the camera'; $status.style.opacity='1';
+    }
+    return;
+  }
+  if (!subjectVis) { subjectVis=true; scanStart=Date.now(); $status.style.opacity='0'; }
+  latestLM = results.multiFaceLandmarks[0];
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ANIMATION LOOP
+═══════════════════════════════════════════════════════════ */
+function animLoop() {
+  if (subjectVis && latestLM) render(latestLM);
+  requestAnimationFrame(animLoop);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LAUNCH
+═══════════════════════════════════════════════════════════ */
+document.getElementById('startBtn').addEventListener('click', () => {
+  const ov = document.getElementById('startOverlay');
+  ov.style.opacity='0'; setTimeout(()=>ov.remove(),500);
+  launch();
+});
+
+function launch() {
+  const hands = new Hands({
+    locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.70,minTrackingConfidence:.60});
+  hands.onResults(onHandResults);
+
+  const faceMesh = new FaceMesh({
+    locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+  });
+  faceMesh.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:.65,minTrackingConfidence:.55});
+  faceMesh.onResults(onFaceResults);
+
+  const cam = new Camera($cam, {
+    onFrame: async () => {
+      if (bodyPart==='hand') await hands.send({image:$cam});
+      else                   await faceMesh.send({image:$cam});
+    },
+    width:1280, height:720,
+  });
+  cam.start();
+  animLoop();
+  setMode('skeletal');
+  setBodyPart('hand');
+}
+</script>
+</body>
+</html>
